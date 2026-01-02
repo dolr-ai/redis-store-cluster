@@ -1,0 +1,162 @@
+name: Deploy Dragonfly to Bare Metal
+
+on:
+  push:
+    # branches:
+    #   - main
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Deploy target (master/replica/both)'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - master
+          - replica
+          - both
+
+jobs:
+  deploy-master:
+    name: Deploy Dragonfly Master
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.HETZNER_BARE_METAL_GITHUB_ACTIONS_SSH_PRIVATE_KEY }}
+
+      - name: Add server to known hosts
+        run: |
+          ssh-keyscan -H ${MASTER_HOST} >> ~/.ssh/known_hosts
+      - name: Check server connectivity
+        run: |
+          ssh -o ConnectTimeout=10 root@${REPLICA_HOST} "echo 'Server connection successful'"
+
+      - name: Sync deployment files to server
+        run: |
+          rsync -avz --delete \
+            ./deploy/docker-compose.master.yml \
+            root@${MASTER_HOST}:/home/yral-metadata/
+
+      - name: Deploy Dragonfly Master
+        env:
+          DRAGONFLY_PASSWORD : ${{ secrets.DRAGONFLY_PASSWORD }}
+        run: |
+          ssh ${{ secrets.MASTER_USER }}@${{ secrets.MASTER_HOST }} << 'EOF'
+            cd ~/dragonfly
+            
+            # Pull latest image
+            docker compose pull
+            
+            # Deploy with zero downtime
+            docker compose up -d --remove-orphans
+            
+            # Wait for health check
+            echo "Waiting for Dragonfly to be healthy..."
+            timeout 60 sh -c 'until docker compose ps | grep -q "healthy"; do sleep 2; done'
+            
+            # Show status
+            docker compose ps
+            docker compose logs --tail=50
+          EOF
+
+      - name: Verify master deployment
+        run: |
+          ssh ${{ secrets.MASTER_USER }}@${{ secrets.MASTER_HOST }} \
+            "docker exec dragonfly-master redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} ping"
+
+  deploy-replica:
+    name: Deploy Dragonfly Replica
+    runs-on: ubuntu-latest
+    needs: deploy-master
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.HETZNER_BARE_METAL_GITHUB_ACTIONS_SSH_PRIVATE_KEY }}
+
+      - name: Add server to known hosts
+        run: |
+          ssh-keyscan -H ${REPLICA_HOST} >> ~/.ssh/known_hosts
+      - name: Check server connectivity
+        run: |
+          ssh -o ConnectTimeout=10 root@${REPLICA_HOST} "echo 'Server connection successful'"
+
+      - name: Sync deployment files to server
+        run: |
+          rsync -avz --delete \
+            ./deploy/docker-compose.replica.yml \
+            root@${REPLICA_HOST}:/home/yral-metadata/
+
+      - name: Deploy Dragonfly Replica
+        run: |
+          ssh ${{ secrets.REPLICA_USER }}@${{ secrets.REPLICA_HOST }} << 'EOF'
+            cd ~/dragonfly
+            
+            # Pull latest image
+            docker compose pull
+            
+            # Deploy
+            docker compose up -d --remove-orphans
+            
+            # Wait for health check
+            echo "Waiting for Dragonfly to be healthy..."
+            timeout 60 sh -c 'until docker compose ps | grep -q "healthy"; do sleep 2; done'
+            
+            # Show status
+            docker compose ps
+            docker compose logs --tail=50
+          EOF
+
+      - name: Verify replica deployment
+        run: |
+          ssh ${{ secrets.REPLICA_USER }}@${{ secrets.REPLICA_HOST }} \
+            "docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} ping"
+
+      - name: Check replication status
+        run: |
+          ssh ${{ secrets.REPLICA_USER }}@${{ secrets.REPLICA_HOST }} \
+            "docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} INFO replication"
+
+
+  health-check:
+    name: Post-Deployment Health Check
+    runs-on: ubuntu-latest
+    needs: [deploy-master, deploy-replica]
+    if: always() && (needs.deploy-master.result == 'success' || needs.deploy-replica.result == 'success')
+    
+    steps:
+      - name: Check master health
+        if: needs.deploy-master.result == 'success'
+        run: |
+          echo "=== Master Health Check ==="
+          ssh ${{ secrets.MASTER_USER }}@${{ secrets.MASTER_HOST }} << 'EOF'
+            docker exec dragonfly-master redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} INFO server | grep uptime
+            docker exec dragonfly-master redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} DBSIZE
+          EOF
+
+      - name: Check replica health
+        if: needs.deploy-replica.result == 'success'
+        run: |
+          echo "=== Replica Health Check ==="
+          ssh ${{ secrets.REPLICA_USER }}@${{ secrets.REPLICA_HOST }} << 'EOF'
+            docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} INFO server | grep uptime
+            docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} INFO replication
+            docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} DBSIZE
+          EOF
+
+      - name: Notify deployment success
+        if: success()
+        run: |
+          echo "Deployment successful!"
+          echo "Master: ${{ needs.deploy-master.result }}"
+          echo "Replica: ${{ needs.deploy-replica.result }}"

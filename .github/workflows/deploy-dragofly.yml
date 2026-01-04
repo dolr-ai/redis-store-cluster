@@ -1,13 +1,17 @@
 name: Deploy Dragonfly to Bare Metal
 
 on:
-  push:
-    # branches:
-    #   - main
   workflow_dispatch:
     inputs:
+      cluster:
+        description: 'Select Cluster'
+        required: true
+        type: choice
+        options:
+          - cluster-1
+          - cluster-2
       target:
-        description: 'Deploy target (master/replica/both)'
+        description: 'Deploy target'
         required: true
         default: 'both'
         type: choice
@@ -16,14 +20,36 @@ on:
           - replica
           - both
 
+concurrency:
+  group: deploy-dragonfly-${{ github.ref }}
+  cancel-in-progress: false
+
+
 jobs:
+
   deploy-master:
     name: Deploy Dragonfly Master
     runs-on: ubuntu-latest
+    if: github.event.inputs.target == 'master' || github.event.inputs.target == 'both'
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set cluster variables
+        id: cluster_vars
+        run: |
+          if [ "${{ github.event.inputs.cluster }}" == "cluster-1" ]; then
+            echo "master_host=${{ vars.MASTER_HOST_CLUSTER_1 }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.inputs.cluster }}" == "cluster-2" ]; then
+            echo "master_host=${{ vars.MASTER_HOST_CLUSTER_2 }}" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Display selected cluster info
+        run: |
+          echo "Deploying to: ${{ github.event.inputs.cluster }}"
+          echo "Master Host: ${{ steps.cluster_vars.outputs.master_host }}"
+          echo "Target: ${{ github.event.inputs.target }}"
 
       - name: Setup SSH key
         uses: webfactory/ssh-agent@v0.9.0
@@ -32,23 +58,23 @@ jobs:
 
       - name: Add server to known hosts
         run: |
-          ssh-keyscan -H ${MASTER_HOST} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ steps.cluster_vars.outputs.master_host }} >> ~/.ssh/known_hosts
       - name: Check server connectivity
         run: |
-          ssh -o ConnectTimeout=10 root@${REPLICA_HOST} "echo 'Server connection successful'"
+          ssh -o ConnectTimeout=10 root@${{ steps.cluster_vars.outputs.master_host }} "echo 'Server connection successful'"
 
       - name: Sync deployment files to server
         run: |
           rsync -avz --delete \
             ./deploy/docker-compose.master.yml \
-            root@${MASTER_HOST}:/home/yral-metadata/
+            root@${{ steps.cluster_vars.outputs.master_host }}:/home/dragonfly/
 
       - name: Deploy Dragonfly Master
         env:
-          DRAGONFLY_PASSWORD : ${{ secrets.DRAGONFLY_PASSWORD }}
+          DRAGONFLY_PASSWORD : ${{ secrets.DRAGONFLY_ROOT_PASSWORD }}
         run: |
-          ssh ${{ secrets.MASTER_USER }}@${{ secrets.MASTER_HOST }} << 'EOF'
-            cd ~/dragonfly
+          ssh root@${{ steps.cluster_vars.outputs.master_host }} << 'EOF'
+            cd /home/dragonfly
             
             # Pull latest image
             docker compose pull
@@ -67,7 +93,7 @@ jobs:
 
       - name: Verify master deployment
         run: |
-          ssh ${{ secrets.MASTER_USER }}@${{ secrets.MASTER_HOST }} \
+          ssh root@${{ steps.cluster_vars.outputs.master_host }} \
             "docker exec dragonfly-master redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} ping"
 
   deploy-replica:
@@ -79,6 +105,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set cluster variables
+        id: cluster_vars
+        run: |
+          if [ "${{ github.event.inputs.cluster }}" == "cluster-1" ]; then
+            echo "master_host=${{ vars.MASTER_HOST_CLUSTER_1 }}" >> $GITHUB_OUTPUT
+            echo "replica_host=${{ vars.REPLICA_HOST_CLUSTER_1 }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.inputs.cluster }}" == "cluster-2" ]; then
+            echo "master_host=${{ vars.MASTER_HOST_CLUSTER_2 }}" >> $GITHUB_OUTPUT
+            echo "replica_host=${{ vars.REPLICA_HOST_CLUSTER_2 }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Setup SSH key
         uses: webfactory/ssh-agent@v0.9.0
         with:
@@ -86,21 +123,24 @@ jobs:
 
       - name: Add server to known hosts
         run: |
-          ssh-keyscan -H ${REPLICA_HOST} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ steps.cluster_vars.outputs.replica_host }} >> ~/.ssh/known_hosts
       - name: Check server connectivity
         run: |
-          ssh -o ConnectTimeout=10 root@${REPLICA_HOST} "echo 'Server connection successful'"
+          ssh -o ConnectTimeout=10 root@${{ steps.cluster_vars.outputs.replica_host }} "echo 'Server connection successful'"
 
       - name: Sync deployment files to server
         run: |
           rsync -avz --delete \
             ./deploy/docker-compose.replica.yml \
-            root@${REPLICA_HOST}:/home/yral-metadata/
+            root@${{ steps.cluster_vars.outputs.replica_host }}:/home/dragonfly/
 
       - name: Deploy Dragonfly Replica
+        env:
+            DRAGONFLY_PASSWORD : ${{ secrets.DRAGONFLY_ROOT_PASSWORD }}
+            MASTER_HOST: ${{ steps.cluster_vars.outputs.master_host }}
         run: |
-          ssh ${{ secrets.REPLICA_USER }}@${{ secrets.REPLICA_HOST }} << 'EOF'
-            cd ~/dragonfly
+          ssh root@${{ steps.cluster_vars.outputs.replica_host }} << 'EOF'
+            cd /home/dragonfly
             
             # Pull latest image
             docker compose pull
@@ -119,13 +159,13 @@ jobs:
 
       - name: Verify replica deployment
         run: |
-          ssh ${{ secrets.REPLICA_USER }}@${{ secrets.REPLICA_HOST }} \
-            "docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} ping"
+          ssh root@${{ steps.cluster_vars.outputs.replica_host }} \
+            "docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} ping"
 
       - name: Check replication status
         run: |
-          ssh ${{ secrets.REPLICA_USER }}@${{ secrets.REPLICA_HOST }} \
-            "docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} INFO replication"
+          ssh root@${{ steps.cluster_vars.outputs.replica_host }} \
+            "docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} INFO replication"
 
 
   health-check:
@@ -135,28 +175,56 @@ jobs:
     if: always() && (needs.deploy-master.result == 'success' || needs.deploy-replica.result == 'success')
     
     steps:
+      - name: Set cluster variables
+        id: cluster_vars
+        run: |
+          if [ "${{ github.event.inputs.cluster }}" == "cluster-1" ]; then
+            echo "master_host=${{ vars.MASTER_HOST_CLUSTER_1 }}" >> $GITHUB_OUTPUT
+            echo "replica_host=${{ vars.REPLICA_HOST_CLUSTER_1 }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.inputs.cluster }}" == "cluster-2" ]; then
+            echo "master_host=${{ vars.MASTER_HOST_CLUSTER_2 }}" >> $GITHUB_OUTPUT
+            echo "replica_host=${{ vars.REPLICA_HOST_CLUSTER_2 }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.HETZNER_BARE_METAL_GITHUB_ACTIONS_SSH_PRIVATE_KEY }}
+
+      - name: Add servers to known hosts
+        run: |
+          ssh-keyscan -H ${{ steps.cluster_vars.outputs.master_host }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ steps.cluster_vars.outputs.replica_host }} >> ~/.ssh/known_hosts
+
       - name: Check master health
         if: needs.deploy-master.result == 'success'
         run: |
-          echo "=== Master Health Check ==="
-          ssh ${{ secrets.MASTER_USER }}@${{ secrets.MASTER_HOST }} << 'EOF'
-            docker exec dragonfly-master redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} INFO server | grep uptime
-            docker exec dragonfly-master redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} DBSIZE
+          echo "=== Master Health Check (${{ github.event.inputs.cluster }}) ==="
+          echo "Host: ${{ steps.cluster_vars.outputs.master_host }}"
+          ssh root@${{ steps.cluster_vars.outputs.master_host }} << 'EOF'
+            docker exec dragonfly-master redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning INFO server | grep uptime_in_seconds
+            docker exec dragonfly-master redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning DBSIZE
           EOF
 
       - name: Check replica health
         if: needs.deploy-replica.result == 'success'
         run: |
-          echo "=== Replica Health Check ==="
-          ssh ${{ secrets.REPLICA_USER }}@${{ secrets.REPLICA_HOST }} << 'EOF'
-            docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} INFO server | grep uptime
-            docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} INFO replication
-            docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} DBSIZE
+          echo "=== Replica Health Check (${{ github.event.inputs.cluster }}) ==="
+          echo "Host: ${{ steps.cluster_vars.outputs.replica_host }}"
+          ssh root@${{ steps.cluster_vars.outputs.replica_host }} << 'EOF'
+            docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning INFO server | grep uptime_in_seconds
+            docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning INFO replication | grep -E "role|master_host|master_link_status"
+            docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning DBSIZE
           EOF
 
-      - name: Notify deployment success
+      - name: Deployment Summary
         if: success()
         run: |
-          echo "Deployment successful!"
-          echo "Master: ${{ needs.deploy-master.result }}"
-          echo "Replica: ${{ needs.deploy-replica.result }}"
+          echo "================================"
+          echo "Deployment Successful"
+          echo "================================"
+          echo ""
+          echo "Cluster: ${{ github.event.inputs.cluster }}"
+          echo "Master Status: ${{ needs.deploy-master.result }}"
+          echo "Replica Status: ${{ needs.deploy-replica.result }}"
+          echo ""

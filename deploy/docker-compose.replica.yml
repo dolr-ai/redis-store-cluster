@@ -9,7 +9,7 @@ services:
 
   dragonfly-replica:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.34.2
-    container_name: dragonfly
+    container_name: dragonfly-replica
     ports:
       - "6379:6379"
     command:
@@ -30,10 +30,10 @@ services:
     environment:
       - DRAGONFLY_PASSWORD=${DRAGONFLY_PASSWORD}
       - MASTER_HOST=${MASTER_HOST}
+    volumes:
+      - dragonfly_data:/data
     networks:
       - dragonfly_network
-    volumes:
-      - dragonfly-data:/data
     restart: unless-stopped
     logging: *default-logging
     healthcheck:

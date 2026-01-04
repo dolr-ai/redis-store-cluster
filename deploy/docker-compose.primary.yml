@@ -6,9 +6,9 @@ x-logging: &default-logging
     tag: "{{.Name}}"
 
 services:
-  dragonfly-master:
+  dragonfly-primary:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.34.2
-    container_name: dragonfly
+    container_name: dragonfly-primary
     ports:
       - "6379:6379"
     command:

@@ -9,13 +9,13 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  MASTER_HOST: ${{ vars.MASTER_HOST_CLUSTER_1 }}
+  PRIMARY_HOST: ${{ vars.PRIMARY_HOST_CLUSTER_1 }}
   REPLICA_HOST: ${{ vars.REPLICA_HOST_CLUSTER_1 }}
 
 jobs:
 
-  deploy-master:
-    name: Deploy Dragonfly Master
+  deploy-primary:
+    name: Deploy Dragonfly Primary
     runs-on: ubuntu-latest
 
     steps:
@@ -25,13 +25,13 @@ jobs:
       - name: Set cluster variables
         id: cluster_vars
         run: |
-            echo "master_host=${MASTER_HOST}" >> $GITHUB_OUTPUT
+            echo "primary_host=${PRIMARY_HOST}" >> $GITHUB_OUTPUT
             echo "replica_host=${REPLICA_HOST}" >> $GITHUB_OUTPUT
       
       - name: Display selected cluster info
         run: |
           echo "Deploying to: ${{ github.event.inputs.cluster }}"
-          echo "Master Host: ${{ steps.cluster_vars.outputs.master_host }}"
+          echo "Primary Host: ${{ steps.cluster_vars.outputs.primary_host }}"
           echo "Target: ${{ github.event.inputs.target }}"
 
       - name: Setup SSH key
@@ -41,53 +41,53 @@ jobs:
 
       - name: Add server to known hosts
         run: |
-          ssh-keyscan -H ${{ steps.cluster_vars.outputs.master_host }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ steps.cluster_vars.outputs.primary_host }} >> ~/.ssh/known_hosts
       - name: Check server connectivity
         run: |
-          ssh -o ConnectTimeout=10 root@${{ steps.cluster_vars.outputs.master_host }} "echo 'Server connection successful'"
+          ssh -o ConnectTimeout=10 root@${{ steps.cluster_vars.outputs.primary_host }} "echo 'Server connection successful'"
 
       - name: Sync deployment files to server
         run: |
           rsync -avz --delete \
-            ./deploy/docker-compose.master.yml \
-            root@${{ steps.cluster_vars.outputs.master_host }}:/home/dragonfly/
+            ./deploy/docker-compose.primary.yml \
+            root@${{ steps.cluster_vars.outputs.primary_host }}:/home/dragonfly/
 
-      - name: Create .env file on master server
+      - name: Create .env file on primary server
         run: |
-          ssh root@${{ steps.cluster_vars.outputs.master_host }} \
+          ssh root@${{ steps.cluster_vars.outputs.primary_host }} \
             "echo 'DRAGONFLY_PASSWORD=${{ secrets.DRAGONFLY_ROOT_PASSWORD }}' > /home/dragonfly/.env"
 
-      - name: Deploy Dragonfly Master
+      - name: Deploy Dragonfly Primary
         env:
           DRAGONFLY_PASSWORD : ${{ secrets.DRAGONFLY_ROOT_PASSWORD }}
         run: |
-          ssh root@${{ steps.cluster_vars.outputs.master_host }} << 'EOF'
+          ssh root@${{ steps.cluster_vars.outputs.primary_host }} << 'EOF'
             cd /home/dragonfly
             
             # Pull latest image
-            docker compose -f docker-compose.master.yml pull
+            docker compose -f docker-compose.primary.yml pull
             
             # Deploy with zero downtime
-            docker compose -f docker-compose.master.yml up -d --remove-orphans
+            docker compose -f docker-compose.primary.yml up -d --remove-orphans
 
             # Wait for health check
             echo "Waiting for Dragonfly to be healthy..."
-            timeout 60 sh -c 'until docker compose -f docker-compose.master.yml ps | grep -q "healthy"; do sleep 2; done'
+            timeout 60 sh -c 'until docker compose -f docker-compose.primary.yml ps | grep -q "healthy"; do sleep 2; done'
             
             # Show status
-            docker compose -f docker-compose.master.yml ps
-            docker compose -f docker-compose.master.yml logs --tail=50
+            docker compose -f docker-compose.primary.yml ps
+            docker compose -f docker-compose.primary.yml logs --tail=50
           EOF
 
-      - name: Verify master deployment
+      - name: Verify primary deployment
         run: |
-          ssh root@${{ steps.cluster_vars.outputs.master_host }} \
-            "docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} ping"
+          ssh root@${{ steps.cluster_vars.outputs.primary_host }} \
+            "docker exec dragonfly-primary redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} ping"
 
   deploy-replica:
     name: Deploy Dragonfly Replica
     runs-on: ubuntu-latest
-    needs: deploy-master
+    needs: deploy-primary
     
     steps:
       - name: Checkout code
@@ -96,7 +96,7 @@ jobs:
       - name: Set cluster variables
         id: cluster_vars
         run: |
-            echo "master_host=${MASTER_HOST}" >> $GITHUB_OUTPUT
+            echo "primary_host=${PRIMARY_HOST}" >> $GITHUB_OUTPUT
             echo "replica_host=${REPLICA_HOST}" >> $GITHUB_OUTPUT
 
       - name: Setup SSH key
@@ -121,13 +121,13 @@ jobs:
         run: |
           ssh root@${{ steps.cluster_vars.outputs.replica_host }} "cat > /home/dragonfly/.env <<EOF
           DRAGONFLY_PASSWORD=${{ secrets.DRAGONFLY_ROOT_PASSWORD }}
-          MASTER_HOST=${{ steps.cluster_vars.outputs.master_host }}
+          PRIMARY_HOST=${{ steps.cluster_vars.outputs.primary_host }}
           EOF"
 
       - name: Deploy Dragonfly Replica
         env:
             DRAGONFLY_PASSWORD : ${{ secrets.DRAGONFLY_ROOT_PASSWORD }}
-            MASTER_HOST: ${{ steps.cluster_vars.outputs.master_host }}
+            PRIMARY_HOST: ${{ steps.cluster_vars.outputs.primary_host }}
         run: |
           ssh root@${{ steps.cluster_vars.outputs.replica_host }} << 'EOF'
             cd /home/dragonfly
@@ -150,25 +150,25 @@ jobs:
       - name: Verify replica deployment
         run: |
           ssh root@${{ steps.cluster_vars.outputs.replica_host }} \
-            "docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} ping"
+            "docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} ping"
 
       - name: Check replication status
         run: |
           ssh root@${{ steps.cluster_vars.outputs.replica_host }} \
-            "docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} INFO replication"
+            "docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} INFO replication"
 
 
   health-check:
     name: Post-Deployment Health Check
     runs-on: ubuntu-latest
-    needs: [deploy-master, deploy-replica]
-    if: always() && (needs.deploy-master.result == 'success' || needs.deploy-replica.result == 'success')
-    
+    needs: [deploy-primary, deploy-replica]
+    if: always() && (needs.deploy-primary.result == 'success' || needs.deploy-replica.result == 'success')
+
     steps:
       - name: Set cluster variables
         id: cluster_vars
         run: |
-            echo "master_host=${MASTER_HOST}" >> $GITHUB_OUTPUT
+            echo "primary_host=${PRIMARY_HOST}" >> $GITHUB_OUTPUT
             echo "replica_host=${REPLICA_HOST}" >> $GITHUB_OUTPUT
 
       - name: Setup SSH key
@@ -178,17 +178,17 @@ jobs:
 
       - name: Add servers to known hosts
         run: |
-          ssh-keyscan -H ${{ steps.cluster_vars.outputs.master_host }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ steps.cluster_vars.outputs.primary_host }} >> ~/.ssh/known_hosts
           ssh-keyscan -H ${{ steps.cluster_vars.outputs.replica_host }} >> ~/.ssh/known_hosts
 
-      - name: Check master health
-        if: needs.deploy-master.result == 'success'
+      - name: Check primary health
+        if: needs.deploy-primary.result == 'success'
         run: |
-          echo "=== Master Health Check (${{ github.event.inputs.cluster }}) ==="
-          echo "Host: ${{ steps.cluster_vars.outputs.master_host }}"
-          ssh root@${{ steps.cluster_vars.outputs.master_host }} << 'EOF'
-            docker exec dragonfly-master redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning INFO server | grep uptime_in_seconds
-            docker exec dragonfly-master redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning DBSIZE
+          echo "=== Primary Health Check (${{ github.event.inputs.cluster }}) ==="
+          echo "Host: ${{ steps.cluster_vars.outputs.primary_host }}"
+          ssh root@${{ steps.cluster_vars.outputs.primary_host }} << 'EOF'
+            docker exec dragonfly-primary redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning INFO server | grep uptime_in_seconds
+            docker exec dragonfly-primary redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning DBSIZE
           EOF
 
       - name: Check replica health
@@ -210,6 +210,6 @@ jobs:
           echo "================================"
           echo ""
           echo "Cluster: ${{ github.event.inputs.cluster }}"
-          echo "Master Status: ${{ needs.deploy-master.result }}"
+          echo "Primary Status: ${{ needs.deploy-primary.result }}"
           echo "Replica Status: ${{ needs.deploy-replica.result }}"
           echo ""

@@ -3,37 +3,21 @@ name: Deploy Dragonfly to Bare Metal
 on:
   push:
   workflow_dispatch:
-    inputs:
-      cluster:
-        description: 'Select Cluster'
-        required: true
-        default: 'cluster-1'
-        type: choice
-        options:
-          - cluster-1
-          - cluster-2
-      target:
-        description: 'Deploy target'
-        required: true
-        default: 'both'
-        type: choice
-        options:
-          - master
-          - replica
-          - both
 
 concurrency:
   group: deploy-dragonfly-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  MASTER_HOST: ${{ vars.MASTER_HOST_CLUSTER_1 }}
+  REPLICA_HOST: ${{ vars.REPLICA_HOST_CLUSTER_1 }}
 
 jobs:
 
   deploy-master:
     name: Deploy Dragonfly Master
     runs-on: ubuntu-latest
-    if: github.event.inputs.target == 'master' || github.event.inputs.target == 'both'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -41,11 +25,8 @@ jobs:
       - name: Set cluster variables
         id: cluster_vars
         run: |
-          if [ "${{ github.event.inputs.cluster }}" == "cluster-1" ]; then
-            echo "master_host=${{ vars.MASTER_HOST_CLUSTER_1 }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.inputs.cluster }}" == "cluster-2" ]; then
-            echo "master_host=${{ vars.MASTER_HOST_CLUSTER_2 }}" >> $GITHUB_OUTPUT
-          fi
+            echo "master_host=${MASTER_HOST}" >> $GITHUB_OUTPUT
+            echo "replica_host=${REPLICA_HOST}" >> $GITHUB_OUTPUT
       
       - name: Display selected cluster info
         run: |
@@ -110,13 +91,8 @@ jobs:
       - name: Set cluster variables
         id: cluster_vars
         run: |
-          if [ "${{ github.event.inputs.cluster }}" == "cluster-1" ]; then
-            echo "master_host=${{ vars.MASTER_HOST_CLUSTER_1 }}" >> $GITHUB_OUTPUT
-            echo "replica_host=${{ vars.REPLICA_HOST_CLUSTER_1 }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.inputs.cluster }}" == "cluster-2" ]; then
-            echo "master_host=${{ vars.MASTER_HOST_CLUSTER_2 }}" >> $GITHUB_OUTPUT
-            echo "replica_host=${{ vars.REPLICA_HOST_CLUSTER_2 }}" >> $GITHUB_OUTPUT
-          fi
+            echo "master_host=${MASTER_HOST}" >> $GITHUB_OUTPUT
+            echo "replica_host=${REPLICA_HOST}" >> $GITHUB_OUTPUT
 
       - name: Setup SSH key
         uses: webfactory/ssh-agent@v0.9.0
@@ -180,13 +156,8 @@ jobs:
       - name: Set cluster variables
         id: cluster_vars
         run: |
-          if [ "${{ github.event.inputs.cluster }}" == "cluster-1" ]; then
-            echo "master_host=${{ vars.MASTER_HOST_CLUSTER_1 }}" >> $GITHUB_OUTPUT
-            echo "replica_host=${{ vars.REPLICA_HOST_CLUSTER_1 }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.inputs.cluster }}" == "cluster-2" ]; then
-            echo "master_host=${{ vars.MASTER_HOST_CLUSTER_2 }}" >> $GITHUB_OUTPUT
-            echo "replica_host=${{ vars.REPLICA_HOST_CLUSTER_2 }}" >> $GITHUB_OUTPUT
-          fi
+            echo "master_host=${MASTER_HOST}" >> $GITHUB_OUTPUT
+            echo "replica_host=${REPLICA_HOST}" >> $GITHUB_OUTPUT
 
       - name: Setup SSH key
         uses: webfactory/ssh-agent@v0.9.0

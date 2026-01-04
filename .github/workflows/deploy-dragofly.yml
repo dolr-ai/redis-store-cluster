@@ -60,18 +60,18 @@ jobs:
             cd /home/dragonfly
             
             # Pull latest image
-            docker compose pull
+            docker compose -f docker-compose.master.yml pull
             
             # Deploy with zero downtime
-            docker compose up -d --remove-orphans
-            
+            docker compose -f docker-compose.master.yml up -d --remove-orphans
+
             # Wait for health check
             echo "Waiting for Dragonfly to be healthy..."
-            timeout 60 sh -c 'until docker compose ps | grep -q "healthy"; do sleep 2; done'
+            timeout 60 sh -c 'until docker compose -f docker-compose.master.yml ps | grep -q "healthy"; do sleep 2; done'
             
             # Show status
-            docker compose ps
-            docker compose logs --tail=50
+            docker compose -f docker-compose.master.yml ps
+            docker compose -f docker-compose.master.yml logs --tail=50
           EOF
 
       - name: Verify master deployment
@@ -121,18 +121,18 @@ jobs:
             cd /home/dragonfly
             
             # Pull latest image
-            docker compose pull
+            docker compose -f docker-compose.replica.yml pull
             
             # Deploy
-            docker compose up -d --remove-orphans
-            
+            docker compose -f docker-compose.replica.yml up -d --remove-orphans
+
             # Wait for health check
             echo "Waiting for Dragonfly to be healthy..."
-            timeout 60 sh -c 'until docker compose ps | grep -q "healthy"; do sleep 2; done'
+            timeout 60 sh -c 'until docker compose -f docker-compose.replica.yml ps | grep -q "healthy"; do sleep 2; done'
             
             # Show status
-            docker compose ps
-            docker compose logs --tail=50
+            docker compose -f docker-compose.replica.yml ps
+            docker compose -f docker-compose.replica.yml logs --tail=50
           EOF
 
       - name: Verify replica deployment

@@ -31,8 +31,8 @@ services:
       - PRIMARY_HOST=${PRIMARY_HOST}
     volumes:
       - dragonfly_data:/data
-    networks:
-      - dragonfly_network
+    # networks:
+    #   - dragonfly_network
     restart: unless-stopped
     logging: *default-logging
     healthcheck:
@@ -67,6 +67,6 @@ volumes:
   dragonfly_data:
       driver: local
 
-networks:
-  dragonfly_network:
-    driver: bridge
+# networks:
+#   dragonfly_network:
+#     driver: bridge

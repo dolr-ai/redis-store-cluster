@@ -48,6 +48,7 @@ services:
     container_name: dragonfly-haproxy
     restart: unless-stopped
     ports:
+      - "6379:6379" # Default Dragonfly port
       - "6380:6380" # Expose port 6380 for TLS connections
       - "6381:6381" # Expose port 6381 for replication connections
     volumes:

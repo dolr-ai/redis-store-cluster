@@ -1,4 +1,4 @@
-name: Deploy Dragonfly to Bare Metal
+name: Deploy Dragonfly to Bare Metal (cluster-1)
 
 on:
   push:
@@ -117,11 +117,11 @@ jobs:
       - name: Create .env file on primary server
         run: |
           ssh root@${{ steps.cluster_vars.outputs.primary_host }} \
-            "echo 'DRAGONFLY_PASSWORD=${{ secrets.DRAGONFLY_ROOT_PASSWORD }}' > /home/dragonfly/.env"
+            "echo 'DRAGONFLY_PASSWORD=${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }}' > /home/dragonfly/.env"
       
       - name: Deploy Dragonfly Primary
         env:
-          DRAGONFLY_PASSWORD : ${{ secrets.DRAGONFLY_ROOT_PASSWORD }}
+          DRAGONFLY_PASSWORD : ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }}
         run: |
           ssh root@${{ steps.cluster_vars.outputs.primary_host }} << 'EOF'
             cd /home/dragonfly
@@ -201,13 +201,13 @@ jobs:
       - name: Create .env file on replica server
         run: |
           ssh root@${{ steps.cluster_vars.outputs.replica_host }} "cat > /home/dragonfly/.env <<EOF
-          DRAGONFLY_PASSWORD=${{ secrets.DRAGONFLY_ROOT_PASSWORD }}
+          DRAGONFLY_PASSWORD=${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }}
           PRIMARY_HOST=${{ steps.cluster_vars.outputs.primary_host }}
           EOF"
 
       - name: Deploy Dragonfly Replica
         env:
-            DRAGONFLY_PASSWORD : ${{ secrets.DRAGONFLY_ROOT_PASSWORD }}
+            DRAGONFLY_PASSWORD : ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }}
             PRIMARY_HOST: ${{ steps.cluster_vars.outputs.primary_host }}
         run: |
           ssh root@${{ steps.cluster_vars.outputs.replica_host }} << 'EOF'
@@ -231,12 +231,12 @@ jobs:
       - name: Verify replica deployment
         run: |
           ssh root@${{ steps.cluster_vars.outputs.replica_host }} \
-            "docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} ping"
+            "docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} ping"
 
       - name: Check replication status
         run: |
           ssh root@${{ steps.cluster_vars.outputs.replica_host }} \
-            "docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} INFO replication"
+            "docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} INFO replication"
 
 
   health-check:
@@ -268,8 +268,8 @@ jobs:
           echo "=== Primary Health Check (${{ github.event.inputs.cluster }}) ==="
           echo "Host: ${{ steps.cluster_vars.outputs.primary_host }}"
           ssh root@${{ steps.cluster_vars.outputs.primary_host }} << 'EOF'
-            docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning INFO server | grep uptime_in_seconds
-            docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning DBSIZE
+            docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} --no-auth-warning INFO server | grep uptime_in_seconds
+            docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} --no-auth-warning DBSIZE
           EOF
 
       - name: Check replica health
@@ -278,9 +278,9 @@ jobs:
           echo "=== Replica Health Check (${{ github.event.inputs.cluster }}) ==="
           echo "Host: ${{ steps.cluster_vars.outputs.replica_host }}"
           ssh root@${{ steps.cluster_vars.outputs.replica_host }} << 'EOF'
-            docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning INFO server | grep uptime_in_seconds
-            docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning INFO replication | grep -E "role|master_host|master_link_status"
-            docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning DBSIZE
+            docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} --no-auth-warning INFO server | grep uptime_in_seconds
+            docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} --no-auth-warning INFO replication | grep -E "role|master_host|master_link_status"
+            docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} --no-auth-warning DBSIZE
           EOF
 
       - name: Deployment Summary

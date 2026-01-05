@@ -6,7 +6,6 @@ x-logging: &default-logging
     tag: "{{.Name}}"
 
 services:
-
   # Replica Dragonfly service
   dragonfly:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.34.2
@@ -56,8 +55,7 @@ services:
       - ./certs/server.pem:/etc/haproxy/server.pem:ro
       - ./certs/ca.crt:/etc/haproxy/ca.crt:ro
     depends_on:
-      dragonfly:
-        condition: service_healthy
+      - dragonfly
     logging: *default-logging
     healthcheck:
       test: ["CMD", "pgrep", "haproxy"]

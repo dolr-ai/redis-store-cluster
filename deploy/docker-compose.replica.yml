@@ -10,10 +10,11 @@ services:
   dragonfly:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.34.2
     container_name: dragonfly
+    network_mode: host
     command:
       - --requirepass=${DRAGONFLY_PASSWORD}
       - --masterauth=${DRAGONFLY_PASSWORD}
-      - --replicaof=${PRIMARY_HOST}:6379
+      - --replicaof=${PRIMARY_HOST}:6381
       - --bind=0.0.0.0
       - --port=6379
       - --dir=/data
@@ -47,9 +48,7 @@ services:
     image: haproxy:2.8-alpine
     container_name: dragonfly-haproxy
     restart: unless-stopped
-    ports:
-      - "6379:6379" # Default Dragonfly port
-      - "6380:6380" # Expose port 6380 for TLS connections
+    network_mode: host
     volumes:
       - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
       - ./certs/server.pem:/etc/haproxy/server.pem:ro

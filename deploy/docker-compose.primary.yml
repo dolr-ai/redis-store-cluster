@@ -9,8 +9,6 @@ services:
   dragonfly-primary:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.34.2
     container_name: dragonfly-primary
-    ports:
-      - "6379:6379"
     command:
       - --requirepass=${DRAGONFLY_PASSWORD}
       - --bind=0.0.0.0
@@ -47,9 +45,8 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
-      - "6380:6380"  # Redis/Dragonfly with TLS
     volumes:
-      - ./haproxy/haproxy.cfg:/etc/haproxy/haproxy.cfg:ro
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
       - ./certs/server.pem:/etc/haproxy/server.pem:ro
       - ./certs/ca.crt:/etc/haproxy/ca.crt:ro
     depends_on:

@@ -103,13 +103,13 @@ jobs:
             root@${{ steps.cluster_vars.outputs.primary_host }}:/home/dragonfly/
 
           # 2. Sync HAProxy config to /home/dragonfly/haproxy/
-          ssh root@${{ steps.cluster_vars.outputs.primary_host }} "mkdir -p /home/dragonfly/haproxy"
+          ssh root@${{ steps.cluster_vars.outputs.primary_host }} " rm -rf /home/dragonfly/haproxy/haproxy.cfg && mkdir -p /home/dragonfly/haproxy"
           rsync -avz \
             ./haproxy/haproxy.cfg \
             root@${{ steps.cluster_vars.outputs.primary_host }}:/home/dragonfly/haproxy/haproxy.cfg
 
           # 3. Sync certs to /home/dragonfly/certs/
-          ssh root@${{ steps.cluster_vars.outputs.primary_host }} "mkdir -p /home/dragonfly/certs"
+          ssh root@${{ steps.cluster_vars.outputs.primary_host }} "rm -rf /home/dragonfly/certs && mkdir -p /home/dragonfly/certs"
           rsync -avz \
             ./certs/ \
             root@${{ steps.cluster_vars.outputs.primary_host }}:/home/dragonfly/certs/
@@ -187,13 +187,13 @@ jobs:
             root@${{ steps.cluster_vars.outputs.replica_host }}:/home/dragonfly/
 
           # 2. Sync HAProxy config to /home/dragonfly/haproxy/
-          ssh root@${{ steps.cluster_vars.outputs.replica_host }} "mkdir -p /home/dragonfly/haproxy"
+          ssh root@${{ steps.cluster_vars.outputs.replica_host }} "rm -rf /home/dragonfly/haproxy/haproxy.cfg &&mkdir -p /home/dragonfly/haproxy"
           rsync -avz \
             ./haproxy/haproxy.cfg \
             root@${{ steps.cluster_vars.outputs.replica_host }}:/home/dragonfly/haproxy/haproxy.cfg
 
           # 3. Sync certs to /home/dragonfly/certs/
-          ssh root@${{ steps.cluster_vars.outputs.replica_host }} "mkdir -p /home/dragonfly/certs"
+          ssh root@${{ steps.cluster_vars.outputs.replica_host }} "rm -rf /home/dragonfly/certs && mkdir -p /home/dragonfly/certs"
           rsync -avz \
             ./certs/ \
             root@${{ steps.cluster_vars.outputs.replica_host }}:/home/dragonfly/certs/

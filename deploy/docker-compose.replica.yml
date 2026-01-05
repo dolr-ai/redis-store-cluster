@@ -57,7 +57,7 @@ services:
       - ./certs/server.pem:/etc/haproxy/server.pem:ro
       - ./certs/ca.crt:/etc/haproxy/ca.crt:ro
     depends_on:
-      dragonfly-primary:
+      dragonfly-replica:
         condition: service_healthy
     logging: *default-logging
     healthcheck:

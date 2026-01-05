@@ -6,9 +6,11 @@ x-logging: &default-logging
     tag: "{{.Name}}"
 
 services:
-  dragonfly-primary:
+
+  # Primary Dragonfly service
+  dragonfly:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.34.2
-    container_name: dragonfly-primary
+    container_name: dragonfly
     command:
       - --requirepass=${DRAGONFLY_PASSWORD}
       - --bind=0.0.0.0
@@ -46,13 +48,12 @@ services:
     ports:
       - "6379:6379" # Default Dragonfly port
       - "6380:6380" # Expose port 6380 for TLS connections
-      - "6381:6381" # Expose port 6381 for replication connections
     volumes:
       - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
       - ./certs/server.pem:/etc/haproxy/server.pem:ro
       - ./certs/ca.crt:/etc/haproxy/ca.crt:ro
     depends_on:
-      dragonfly-primary:
+      dragonfly:
         condition: service_healthy
     logging: *default-logging
     healthcheck:

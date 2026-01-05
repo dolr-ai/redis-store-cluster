@@ -144,7 +144,7 @@ jobs:
       - name: Verify primary deployment
         run: |
           ssh root@${{ steps.cluster_vars.outputs.primary_host }} \
-            "docker exec dragonfly-primary redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} ping"
+            "docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_PASSWORD }} ping"
 
   deploy-replica:
     name: Deploy Dragonfly Replica
@@ -231,12 +231,12 @@ jobs:
       - name: Verify replica deployment
         run: |
           ssh root@${{ steps.cluster_vars.outputs.replica_host }} \
-            "docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} ping"
+            "docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} ping"
 
       - name: Check replication status
         run: |
           ssh root@${{ steps.cluster_vars.outputs.replica_host }} \
-            "docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} INFO replication"
+            "docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} INFO replication"
 
 
   health-check:
@@ -268,8 +268,8 @@ jobs:
           echo "=== Primary Health Check (${{ github.event.inputs.cluster }}) ==="
           echo "Host: ${{ steps.cluster_vars.outputs.primary_host }}"
           ssh root@${{ steps.cluster_vars.outputs.primary_host }} << 'EOF'
-            docker exec dragonfly-primary redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning INFO server | grep uptime_in_seconds
-            docker exec dragonfly-primary redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning DBSIZE
+            docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning INFO server | grep uptime_in_seconds
+            docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning DBSIZE
           EOF
 
       - name: Check replica health
@@ -278,9 +278,9 @@ jobs:
           echo "=== Replica Health Check (${{ github.event.inputs.cluster }}) ==="
           echo "Host: ${{ steps.cluster_vars.outputs.replica_host }}"
           ssh root@${{ steps.cluster_vars.outputs.replica_host }} << 'EOF'
-            docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning INFO server | grep uptime_in_seconds
-            docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning INFO replication | grep -E "role|master_host|master_link_status"
-            docker exec dragonfly-replica redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning DBSIZE
+            docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning INFO server | grep uptime_in_seconds
+            docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning INFO replication | grep -E "role|master_host|master_link_status"
+            docker exec dragonfly redis-cli -a ${{ secrets.DRAGONFLY_ROOT_PASSWORD }} --no-auth-warning DBSIZE
           EOF
 
       - name: Deployment Summary

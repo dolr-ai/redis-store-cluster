@@ -46,17 +46,79 @@ jobs:
         run: |
           ssh -o ConnectTimeout=10 root@${{ steps.cluster_vars.outputs.primary_host }} "echo 'Server connection successful'"
 
+      - name: Generate TLS Certificates
+        id: generate-certs
+        run: |
+          mkdir -p certs
+          
+          # Create SAN config using the Workflow Variables
+          # We include both Primary and Replica IPs so the cert is valid for both
+          SAN_CNF=$(mktemp)
+          echo "subjectAltName = IP:${{ steps.cluster_vars.outputs.primary_host }},IP:${{ steps.cluster_vars.outputs.replica_host }}" > "$SAN_CNF"
+          
+          echo "Generating CA..."
+          openssl genrsa -out certs/ca.key 4096
+          openssl req -x509 -new -nodes -key certs/ca.key -sha256 -days 365 \
+            -subj "/CN=dragonfly-internal-ca" -out certs/ca.crt
+
+          echo "Generating Server Cert..."
+          openssl req -new -newkey rsa:4096 -nodes \
+            -keyout certs/server.key \
+            -out certs/server.csr \
+            -subj "/CN=dragonfly-node"
+          
+          openssl x509 -req -in certs/server.csr \
+            -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial \
+            -out certs/server.crt -days 365 -sha256 -extfile "$SAN_CNF"
+          
+          # Create PEM (Combined) if needed by HAProxy, but keep individual files for Dragonfly
+          cat certs/server.crt certs/server.key > certs/server.pem
+
+          echo "Generating Client Cert..."
+          openssl req -new -newkey rsa:4096 -nodes \
+            -keyout certs/client.key \
+            -out certs/client.csr \
+            -subj "/CN=redis-client"
+            
+          openssl x509 -req -in certs/client.csr \
+            -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial \
+            -out certs/client.crt -days 365 -sha256
+
+          # Cleanup
+          rm -f "$SAN_CNF"
+          ls -l certs/
+
+      - name: Upload Certs Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dragonfly-certs
+          path: certs/
+          retention-days: 1
+
       - name: Sync deployment files to server
         run: |
+          # 1. Sync docker-compose.primary.yml to remote server
           rsync -avz --delete \
             ./deploy/docker-compose.primary.yml \
             root@${{ steps.cluster_vars.outputs.primary_host }}:/home/dragonfly/
+
+          # 2. Sync HAProxy config to /home/dragonfly/haproxy/
+          ssh root@${{ steps.cluster_vars.outputs.primary_host }} "mkdir -p /home/dragonfly/haproxy"
+          rsync -avz \
+            ./haproxy/haproxy.cfg \
+            root@${{ steps.cluster_vars.outputs.primary_host }}:/home/dragonfly/haproxy/haproxy.cfg
+
+          # 3. Sync certs to /home/dragonfly/certs/
+          ssh root@${{ steps.cluster_vars.outputs.primary_host }} "mkdir -p /home/dragonfly/certs"
+          rsync -avz \
+            ./certs/ \
+            root@${{ steps.cluster_vars.outputs.primary_host }}:/home/dragonfly/certs/
 
       - name: Create .env file on primary server
         run: |
           ssh root@${{ steps.cluster_vars.outputs.primary_host }} \
             "echo 'DRAGONFLY_PASSWORD=${{ secrets.DRAGONFLY_ROOT_PASSWORD }}' > /home/dragonfly/.env"
-
+      
       - name: Deploy Dragonfly Primary
         env:
           DRAGONFLY_PASSWORD : ${{ secrets.DRAGONFLY_ROOT_PASSWORD }}
@@ -99,6 +161,12 @@ jobs:
             echo "primary_host=${PRIMARY_HOST}" >> $GITHUB_OUTPUT
             echo "replica_host=${REPLICA_HOST}" >> $GITHUB_OUTPUT
 
+      - name: Download Certs Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dragonfly-certs
+          path: certs
+
       - name: Setup SSH key
         uses: webfactory/ssh-agent@v0.9.0
         with:
@@ -113,9 +181,22 @@ jobs:
 
       - name: Sync deployment files to server
         run: |
+          # 1. Sync docker-compose.replica.yml to remote server
           rsync -avz --delete \
             ./deploy/docker-compose.replica.yml \
             root@${{ steps.cluster_vars.outputs.replica_host }}:/home/dragonfly/
+
+          # 2. Sync HAProxy config to /home/dragonfly/haproxy/
+          ssh root@${{ steps.cluster_vars.outputs.replica_host }} "mkdir -p /home/dragonfly/haproxy"
+          rsync -avz \
+            ./haproxy/haproxy.cfg \
+            root@${{ steps.cluster_vars.outputs.replica_host }}:/home/dragonfly/haproxy/haproxy.cfg
+
+          # 3. Sync certs to /home/dragonfly/certs/
+          ssh root@${{ steps.cluster_vars.outputs.replica_host }} "mkdir -p /home/dragonfly/certs"
+          rsync -avz \
+            ./certs/ \
+            root@${{ steps.cluster_vars.outputs.replica_host }}:/home/dragonfly/certs/
 
       - name: Create .env file on replica server
         run: |

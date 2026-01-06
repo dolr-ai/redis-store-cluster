@@ -66,7 +66,7 @@ jobs:
 
           echo "Generating Server Cert..."
           # Output key to .pem and CSR to .pem
-          openssl req -newkey rsa:4096 -nodes -keyout certs/server-key.pem -out certs/server-req.pem
+          openssl req -newkey rsa:4096 -nodes -keyout certs/server-key.pem -out certs/server-req.pem -subj "/CN=server" --extfile "$SAN_CNF"
 
           # Sign server cert using the SAN config
           openssl x509 -req -in certs/server-req.pem -days 365 \

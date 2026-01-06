@@ -47,57 +47,6 @@ jobs:
         run: |
           ssh -o ConnectTimeout=10 root@${{ steps.cluster_vars.outputs.primary_host }} "echo 'Server connection successful'"
 
-      - name: Generate Certificates for Dragonfly mTLS
-        id: generate-certs
-        run: |
-          mkdir -p certs
-
-          # Create SAN config
-          # Keeping this is vital because you are connecting via IP addresses
-          SAN_CNF=$(mktemp)
-          echo "subjectAltName = IP:${{ steps.cluster_vars.outputs.primary_host }},IP:${{ steps.cluster_vars.outputs.replica_host }}" > "$SAN_CNF"
-
-          echo "Generating CA..."
-          # Combined genrsa and req -x509 into one step, outputting .pem
-          openssl req -x509 -new -nodes -newkey rsa:4096 \
-            -keyout certs/ca-key.pem \
-            -out certs/ca-cert.pem \
-            -days 365 \
-            -subj "/CN=dragonfly-internal-ca"
-
-          echo "Generating Server Cert..."
-          # Output key to .pem and CSR to .pem
-          openssl req -newkey rsa:4096 -nodes -keyout certs/server-key.pem -out certs/server-req.pem
-
-          # Sign server cert using the SAN config
-          openssl x509 -req -in certs/server-req.pem -days 365 \
-             -CA certs/ca-cert.pem -CAkey certs/ca-key.pem \
-             -CAcreateserial -out certs/server-cert.pem
-
-          echo "Generating Client Cert..."
-          # This corresponds to 'replica-client-key.pem' mentioned in docs
-          openssl req -newkey rsa:4096 -nodes -keyout certs/client-key.pem -out certs/client-req.pem
-
-          openssl x509 -req -in certs/client-req.pem \
-            -CA certs/ca-cert.pem -CAkey certs/ca-key.pem -CAcreateserial \
-            -out certs/client-cert.pem -days 365
-
-          # Set proper permissions
-          chmod 644 certs/*-cert.pem
-          chmod 644 certs/*-key.pem
-
-          # Cleanup
-          # Remove temp config, serial files, and signing requests
-          rm -f "$SAN_CNF" certs/*.srl certs/*-req.pem
-          ls -l certs/
-
-      - name: Upload Certs Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dragonfly-certs
-          path: certs/
-          retention-days: 1
-
       - name: Sync deployment files to server
         run: |
           # Sync docker-compose.primary.yml to remote server
@@ -105,18 +54,12 @@ jobs:
             ./deploy/docker-compose.primary.yml \
             root@${{ steps.cluster_vars.outputs.primary_host }}:/home/dragonfly/
 
-          # Sync certs to /home/dragonfly/certs/
-          ssh root@${{ steps.cluster_vars.outputs.primary_host }} "rm -rf /home/dragonfly/certs && mkdir -p /home/dragonfly/certs"
-          rsync -avz \
-            ./certs/ \
-            root@${{ steps.cluster_vars.outputs.primary_host }}:/home/dragonfly/certs/
-
           # Fix permissions on the server
           ssh root@${{ steps.cluster_vars.outputs.primary_host }} << 'EOF'
-            chmod 755 /home/dragonfly/certs
-            chmod 644 /home/dragonfly/certs/*-cert.pem
-            chmod 644 /home/dragonfly/certs/*-key.pem
-            ls -la /home/dragonfly/certs/
+            chmod 755 /home/certs
+            chmod 644 /home/certs/*-cert.pem
+            chmod 644 /home/certs/*-key.pem
+            ls -la /home/certs/
           EOF
 
       - name: Create .env file on primary server
@@ -174,12 +117,6 @@ jobs:
             echo "primary_host=${PRIMARY_HOST}" >> $GITHUB_OUTPUT
             echo "replica_host=${REPLICA_HOST}" >> $GITHUB_OUTPUT
 
-      - name: Download Certs Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: dragonfly-certs
-          path: certs
-
       - name: Setup SSH key
         uses: webfactory/ssh-agent@v0.9.0
         with:
@@ -200,18 +137,12 @@ jobs:
             ./deploy/docker-compose.replica.yml \
             root@${{ steps.cluster_vars.outputs.replica_host }}:/home/dragonfly/
 
-          # Sync certs to /home/dragonfly/certs/
-          ssh root@${{ steps.cluster_vars.outputs.replica_host }} "rm -rf /home/dragonfly/certs && mkdir -p /home/dragonfly/certs"
-          rsync -avz \
-            ./certs/ \
-            root@${{ steps.cluster_vars.outputs.replica_host }}:/home/dragonfly/certs/
-
           # Fix permissions on the server
           ssh root@${{ steps.cluster_vars.outputs.primary_host }} << 'EOF'
-            chmod 755 /home/dragonfly/certs
-            chmod 644 /home/dragonfly/certs/*-cert.pem
-            chmod 644 /home/dragonfly/certs/*-key.pem
-            ls -la /home/dragonfly/certs/
+            chmod 755 /home/certs
+            chmod 644 /home/certs/*-cert.pem
+            chmod 644 /home/certs/*-key.pem
+            ls -la /home/certs/
           EOF
 
       - name: Create .env file on replica server

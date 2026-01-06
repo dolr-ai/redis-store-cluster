@@ -32,7 +32,7 @@ services:
       - DRAGONFLY_PASSWORD=${DRAGONFLY_PASSWORD}
     volumes:
       - dragonfly_data:/data
-      - ./certs:/etc/dragonfly/certs:ro
+      - /home/certs:/etc/dragonfly/certs:ro
     networks:
       - dragonfly_network
     restart: unless-stopped

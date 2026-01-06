@@ -28,7 +28,6 @@ services:
       - --tls_cert_file=/etc/dragonfly/certs/server.crt
       - --tls_key_file=/etc/dragonfly/certs/server.key
       - --tls_ca_cert_file=/etc/dragonfly/certs/ca.crt
-      - --tls_client_cert_optional=false
     environment:
       - DRAGONFLY_PASSWORD=${DRAGONFLY_PASSWORD}
     volumes:

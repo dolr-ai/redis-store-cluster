@@ -51,42 +51,49 @@ jobs:
         id: generate-certs
         run: |
           mkdir -p certs
-          
+
           # Create SAN config
           SAN_CNF=$(mktemp)
           echo "subjectAltName = IP:${{ steps.cluster_vars.outputs.primary_host }},IP:${{ steps.cluster_vars.outputs.replica_host }}" > "$SAN_CNF"
-          
+
           echo "Generating CA..."
-          openssl genrsa -out certs/ca.key 4096
-          openssl req -x509 -new -nodes -key certs/ca.key -sha256 -days 365 \
-            -subj "/CN=dragonfly-internal-ca" -out certs/ca.crt
+          # Combined genrsa and req -x509 into one step, outputting .pem
+          openssl req -x509 -new -nodes -newkey rsa:4096 \
+            -keyout certs/ca-key.pem \
+            -out certs/ca-cert.pem \
+            -days 365 \
+            -subj "/CN=dragonfly-internal-ca"
 
           echo "Generating Server Cert..."
+          # Output key to .pem and CSR to .pem
           openssl req -new -newkey rsa:4096 -nodes \
-            -keyout certs/server.key \
-            -out certs/server.csr \
+            -keyout certs/server-key.pem \
+            -out certs/server-req.pem \
             -subj "/CN=dragonfly-node"
-          
-          openssl x509 -req -in certs/server.csr \
-            -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial \
-            -out certs/server.crt -days 365 -sha256 -extfile "$SAN_CNF"
+
+          # Sign server cert using the SAN config
+          openssl x509 -req -in certs/server-req.pem \
+            -CA certs/ca-cert.pem -CAkey certs/ca-key.pem -CAcreateserial \
+            -out certs/server-cert.pem -days 365 -sha256 -extfile "$SAN_CNF"
 
           echo "Generating Client Cert..."
+          # This corresponds to 'replica-client-key.pem' mentioned in docs
           openssl req -new -newkey rsa:4096 -nodes \
-            -keyout certs/client.key \
-            -out certs/client.csr \
+            -keyout certs/client-key.pem \
+            -out certs/client-req.pem \
             -subj "/CN=redis-client"
-            
-          openssl x509 -req -in certs/client.csr \
-            -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial \
-            -out certs/client.crt -days 365 -sha256
+
+          openssl x509 -req -in certs/client-req.pem \
+            -CA certs/ca-cert.pem -CAkey certs/ca-key.pem -CAcreateserial \
+            -out certs/client-cert.pem -days 365 -sha256
 
           # Set proper permissions
-          chmod 644 certs/*.crt
-          chmod 600 certs/*.key
-          
+          chmod 644 certs/*-cert.pem
+          chmod 644 certs/*-key.pem
+
           # Cleanup
-          rm -f "$SAN_CNF"
+          # Remove temp config, serial files, and signing requests
+          rm -f "$SAN_CNF" certs/*.srl certs/*-req.pem
           ls -l certs/
 
       - name: Upload Certs Artifact
@@ -112,8 +119,8 @@ jobs:
           # Fix permissions on the server
           ssh root@${{ steps.cluster_vars.outputs.primary_host }} << 'EOF'
             chmod 755 /home/dragonfly/certs
-            chmod 644 /home/dragonfly/certs/*.crt
-            chmod 600 /home/dragonfly/certs/*.key
+            chmod 644 /home/dragonfly/certs/*-cert.pem
+            chmod 644 /home/dragonfly/certs/*-key.pem
             ls -la /home/dragonfly/certs/
           EOF
 
@@ -150,9 +157,9 @@ jobs:
             docker exec dragonfly redis-cli \
               -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
               --tls \
-              --cert /etc/dragonfly/certs/client.crt \
-              --key /etc/dragonfly/certs/client.key \
-              --cacert /etc/dragonfly/certs/ca.crt \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
               -p 6380 \
               ping
           EOF
@@ -203,6 +210,14 @@ jobs:
           rsync -avz \
             ./certs/ \
             root@${{ steps.cluster_vars.outputs.replica_host }}:/home/dragonfly/certs/
+          
+          # Fix permissions on the server
+          ssh root@${{ steps.cluster_vars.outputs.primary_host }} << 'EOF'
+            chmod 755 /home/dragonfly/certs
+            chmod 644 /home/dragonfly/certs/*-cert.pem
+            chmod 644 /home/dragonfly/certs/*-key.pem
+            ls -la /home/dragonfly/certs/
+          EOF
 
       - name: Create .env file on replica server
         run: |
@@ -240,9 +255,9 @@ jobs:
             docker exec dragonfly redis-cli \
               -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
               --tls \
-              --cert /etc/dragonfly/certs/client.crt \
-              --key /etc/dragonfly/certs/client.key \
-              --cacert /etc/dragonfly/certs/ca.crt \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
               -p 6380 \
               ping
           EOF
@@ -253,9 +268,9 @@ jobs:
             docker exec dragonfly redis-cli \
               -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
               --tls \
-              --cert /etc/dragonfly/certs/client.crt \
-              --key /etc/dragonfly/certs/client.key \
-              --cacert /etc/dragonfly/certs/ca.crt \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
               -p 6380 \
               INFO replication
           EOF
@@ -292,17 +307,17 @@ jobs:
             docker exec dragonfly redis-cli \
               -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
               --tls \
-              --cert /etc/dragonfly/certs/client.crt \
-              --key /etc/dragonfly/certs/client.key \
-              --cacert /etc/dragonfly/certs/ca.crt \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
               -p 6380 \
               --no-auth-warning INFO server | grep uptime_in_seconds
             docker exec dragonfly redis-cli \
               -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
               --tls \
-              --cert /etc/dragonfly/certs/client.crt \
-              --key /etc/dragonfly/certs/client.key \
-              --cacert /etc/dragonfly/certs/ca.crt \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
               -p 6380 \
               --no-auth-warning DBSIZE
           EOF
@@ -316,25 +331,25 @@ jobs:
             docker exec dragonfly redis-cli \
               -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
               --tls \
-              --cert /etc/dragonfly/certs/client.crt \
-              --key /etc/dragonfly/certs/client.key \
-              --cacert /etc/dragonfly/certs/ca.crt \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
               -p 6380 \
               --no-auth-warning INFO server | grep uptime_in_seconds
             docker exec dragonfly redis-cli \
               -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
               --tls \
-              --cert /etc/dragonfly/certs/client.crt \
-              --key /etc/dragonfly/certs/client.key \
-              --cacert /etc/dragonfly/certs/ca.crt \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
               -p 6380 \
               --no-auth-warning INFO replication | grep -E "role|master_host|master_link_status"
             docker exec dragonfly redis-cli \
               -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
               --tls \
-              --cert /etc/dragonfly/certs/client.crt \
-              --key /etc/dragonfly/certs/client.key \
-              --cacert /etc/dragonfly/certs/ca.crt \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
               -p 6380 \
               --no-auth-warning DBSIZE
           EOF

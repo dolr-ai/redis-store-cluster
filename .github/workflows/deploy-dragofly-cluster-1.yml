@@ -138,7 +138,7 @@ jobs:
             root@${{ steps.cluster_vars.outputs.replica_host }}:/home/dragonfly/
           
           # Fix permissions on the server
-          ssh root@${{ steps.cluster_vars.outputs.primary_host }} << 'EOF'
+          ssh root@${{ steps.cluster_vars.outputs.replica_host }} << 'EOF'
             chmod 755 /home/certs
             chmod 644 /home/certs/*-cert.pem
             chmod 644 /home/certs/*-key.pem

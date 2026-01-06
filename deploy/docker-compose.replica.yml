@@ -27,9 +27,9 @@ services:
       - --logtostderr
       - --vmodule=*=1  # 0=ERROR, 1=WARNING, 2=INFO, 3=DEBUG
       - --tls=true
-      - --tls_cert_file=/home/dragonfly/certs/server-cert.pem
-      - --tls_key_file=/home/dragonfly/certs/server-key.pem
-      - --tls_ca_cert_file=/home/dragonfly/certs/ca-cert.pem
+      - --tls_cert_file=/etc/dragonfly/certs/server-cert.pem
+      - --tls_key_file=/etc/dragonfly/certs/server-key.pem
+      - --tls_ca_cert_file=/etc/dragonfly/certs/ca-cert.pem
       - --tls_replication=true
     environment:
       - DRAGONFLY_PASSWORD=${DRAGONFLY_PASSWORD}

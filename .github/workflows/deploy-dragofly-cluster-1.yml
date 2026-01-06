@@ -66,26 +66,20 @@ jobs:
 
           echo "Generating Server Cert..."
           # Output key to .pem and CSR to .pem
-          openssl req -new -newkey rsa:4096 -nodes \
-            -keyout certs/server-key.pem \
-            -out certs/server-req.pem \
-            -subj "/CN=dragonfly-node"
+          openssl req -newkey rsa:4096 -nodes -keyout certs/server-key.pem -out certs/server-req.pem
 
           # Sign server cert using the SAN config
-          openssl x509 -req -in certs/server-req.pem \
-            -CA certs/ca-cert.pem -CAkey certs/ca-key.pem -CAcreateserial \
-            -out certs/server-cert.pem -days 365 -sha256 -extfile "$SAN_CNF"
+          openssl x509 -req -in certs/server-req.pem -days 365 \
+             -CA certs/ca-cert.pem -CAkey certs/ca-key.pem \
+             -CAcreateserial -out certs/server-cert.pem
 
           echo "Generating Client Cert..."
           # This corresponds to 'replica-client-key.pem' mentioned in docs
-          openssl req -new -newkey rsa:4096 -nodes \
-            -keyout certs/client-key.pem \
-            -out certs/client-req.pem \
-            -subj "/CN=redis-client"
+          openssl req -newkey rsa:4096 -nodes -keyout certs/client-key.pem -out certs/client-req.pem
 
           openssl x509 -req -in certs/client-req.pem \
             -CA certs/ca-cert.pem -CAkey certs/ca-key.pem -CAcreateserial \
-            -out certs/client-cert.pem -days 365 -sha256
+            -out certs/client-cert.pem -days 365
 
           # Set proper permissions
           chmod 644 certs/*-cert.pem

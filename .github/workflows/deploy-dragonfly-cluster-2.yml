@@ -52,8 +52,7 @@ jobs:
         run: |
           mkdir -p certs
           
-          # Create SAN config using the Workflow Variables
-          # We include both Primary and Replica IPs so the cert is valid for both
+          # Create SAN config
           SAN_CNF=$(mktemp)
           echo "subjectAltName = IP:${{ steps.cluster_vars.outputs.primary_host }},IP:${{ steps.cluster_vars.outputs.replica_host }}" > "$SAN_CNF"
           
@@ -71,8 +70,6 @@ jobs:
           openssl x509 -req -in certs/server.csr \
             -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial \
             -out certs/server.crt -days 365 -sha256 -extfile "$SAN_CNF"
-          
-          cat certs/server.crt certs/server.key > certs/server.pem
 
           echo "Generating Client Cert..."
           openssl req -new -newkey rsa:4096 -nodes \
@@ -84,6 +81,10 @@ jobs:
             -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial \
             -out certs/client.crt -days 365 -sha256
 
+          # Set proper permissions
+          chmod 644 certs/*.crt
+          chmod 600 certs/*.key
+          
           # Cleanup
           rm -f "$SAN_CNF"
           ls -l certs/
@@ -107,6 +108,14 @@ jobs:
           rsync -avz \
             ./certs/ \
             root@${{ steps.cluster_vars.outputs.primary_host }}:/home/dragonfly/certs/
+
+          # Fix permissions on the server
+          ssh root@${{ steps.cluster_vars.outputs.primary_host }} << 'EOF'
+            chmod 755 /home/dragonfly/certs
+            chmod 644 /home/dragonfly/certs/*.crt
+            chmod 600 /home/dragonfly/certs/*.key
+            ls -la /home/dragonfly/certs/
+          EOF
 
       - name: Create .env file on primary server
         run: |

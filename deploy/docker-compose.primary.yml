@@ -10,11 +10,12 @@ services:
   dragonfly:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.34.2
     container_name: dragonfly
-    network_mode: host
+    ports:
+      - "6380:6380"
     command:
       - --requirepass=${DRAGONFLY_PASSWORD}
       - --bind=0.0.0.0
-      - --port=6379
+      - --port=6380
       - --dir=/data
       - --dbfilename=dump
       - --snapshot_cron=0 */6 * * *  # Snapshot every 6 hours
@@ -23,17 +24,22 @@ services:
       - --primary_port_http_enabled=true
       - --logtostderr
       - --vmodule=*=1  # 0=ERROR, 1=WARNING, 2=INFO, 3=DEBUG
-      - --tls=false  # HAProxy handles TLS
+      - --tls=true
+      - --tls_cert_file=/etc/dragonfly/certs/server.crt
+      - --tls_key_file=/etc/dragonfly/certs/server.key
+      - --tls_ca_cert_file=/etc/dragonfly/certs/ca.crt
+      - --tls_client_cert_optional=false
     environment:
       - DRAGONFLY_PASSWORD=${DRAGONFLY_PASSWORD}
     volumes:
       - dragonfly_data:/data
-    # networks:
-    #   - dragonfly_network
+      - ./certs:/etc/dragonfly/certs:ro
+    networks:
+      - dragonfly_network
     restart: unless-stopped
     logging: *default-logging
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${DRAGONFLY_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${DRAGONFLY_PASSWORD}", "--tls", "--cert", "/etc/dragonfly/certs/client.crt", "--key", "/etc/dragonfly/certs/client.key", "--cacert", "/etc/dragonfly/certs/ca.crt", "-p", "6380", "ping"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -41,28 +47,10 @@ services:
     ulimits:
       memlock: -1
 
-  haproxy:
-    image: haproxy:2.8-alpine
-    container_name: dragonfly-haproxy
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
-      - ./certs/server.pem:/etc/haproxy/server.pem:ro
-      - ./certs/ca.crt:/etc/haproxy/ca.crt:ro
-    depends_on:
-      - dragonfly
-    logging: *default-logging
-    healthcheck:
-      test: ["CMD", "pgrep", "haproxy"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
 volumes:
   dragonfly_data:
       driver: local
 
-# networks:
-#   dragonfly_network:
-#     driver: bridge
+networks:
+  dragonfly_network:
+    driver: bridge

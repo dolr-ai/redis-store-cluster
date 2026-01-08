@@ -6,14 +6,24 @@ PRIMARY_IP = 'IP_ADDRESS_OF_PRIMARY'
 REPLICA_IP = 'IP_ADDRESS_OF_REPLICA'
 PASSWORD = 'DRAGONFLY_PASSWORD'
 
+PORT = 6380
+CERT_DIR = "cert directory path on test machine"
+CA_CERT = CERT_DIR + "/ca-cert.pem"
+CLIENT_CERT = CERT_DIR + "/client-cert.pem"
+CLIENT_KEY = CERT_DIR + "/client-key.pem"
+
 def test_primary():
     print('\n=== Testing Primary ===')
     
     try:
         r = redis.Redis(
             host=PRIMARY_IP,
-            port=6379,
+            port=PORT,
             password=PASSWORD,
+            ssl=True,
+            ssl_ca_certs=str(CA_CERT),
+            ssl_certfile=str(CLIENT_CERT),
+            ssl_keyfile=str(CLIENT_KEY),
             decode_responses=True
         )
         
@@ -49,8 +59,12 @@ def test_replica():
     try:
         r = redis.Redis(
             host=REPLICA_IP,
-            port=6379,
+            port=PORT,
             password=PASSWORD,
+            ssl=True,
+            ssl_ca_certs=str(CA_CERT),
+            ssl_certfile=str(CLIENT_CERT),
+            ssl_keyfile=str(CLIENT_KEY),
             decode_responses=True
         )
         

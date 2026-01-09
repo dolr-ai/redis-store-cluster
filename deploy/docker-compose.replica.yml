@@ -72,18 +72,18 @@ services:
     command: >
       /bin/sh -c "
       if [ ! -f /data/sentinel.conf ]; then
-        echo 'Creating new sentinel config...'
-        echo 'port 0' > /data/sentinel.conf
-        echo 'tls-port 26379' >> /data/sentinel.conf
-        echo 'dir /data' >> /data/sentinel.conf
-        echo 'sentinel resolve-hostnames yes' >> /data/sentinel.conf
-        echo 'sentinel announce-ip ${CURRENT_HOST}' >> /data/sentinel.conf
-        echo 'sentinel monitor mymaster ${PRIMARY_HOST} 6380 2' >> /data/sentinel.conf
-        echo 'sentinel auth-pass mymaster ${DRAGONFLY_PASSWORD}' >> /data/sentinel.conf
-        echo 'sentinel down-after-milliseconds mymaster 5000' >> /data/sentinel.conf
-        echo 'sentinel failover-timeout mymaster 60000' >> /data/sentinel.conf
-        echo 'sentinel parallel-syncs mymaster 1' >> /data/sentinel.conf
-        echo 'tls-replication yes' >> /data/sentinel.conf
+        echo 'Creating new sentinel config...';
+        echo 'port 0' > /data/sentinel.conf;
+        echo 'tls-port 26379' >> /data/sentinel.conf;
+        echo 'dir /data' >> /data/sentinel.conf;
+        echo 'sentinel resolve-hostnames yes' >> /data/sentinel.conf;
+        echo 'sentinel announce-ip ${CURRENT_HOST}' >> /data/sentinel.conf;
+        echo 'sentinel monitor mymaster ${PRIMARY_HOST} 6380 2' >> /data/sentinel.conf;
+        echo 'sentinel auth-pass mymaster ${DRAGONFLY_PASSWORD}' >> /data/sentinel.conf;
+        echo 'sentinel down-after-milliseconds mymaster 5000' >> /data/sentinel.conf;
+        echo 'sentinel failover-timeout mymaster 60000' >> /data/sentinel.conf;
+        echo 'sentinel parallel-syncs mymaster 1' >> /data/sentinel.conf;
+        echo 'tls-replication yes' >> /data/sentinel.conf;
       else
         echo 'Sentinel config exists, using existing...'
       fi

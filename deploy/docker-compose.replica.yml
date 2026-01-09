@@ -72,7 +72,6 @@ services:
     command: >
       /bin/sh -c "
       if [ ! -f /data/sentinel.conf ]; then
-        echo 'Creating new sentinel config...';
         echo 'port 0' > /data/sentinel.conf;
         echo 'tls-port 26379' >> /data/sentinel.conf;
         echo 'dir /data' >> /data/sentinel.conf;
@@ -84,10 +83,14 @@ services:
         echo 'sentinel failover-timeout mymaster 60000' >> /data/sentinel.conf;
         echo 'sentinel parallel-syncs mymaster 1' >> /data/sentinel.conf;
         echo 'tls-replication yes' >> /data/sentinel.conf;
+        echo 'tls-cert-file /etc/dragonfly/certs/server-cert.pem' >> /data/sentinel.conf;
+        echo 'tls-key-file /etc/dragonfly/certs/server-key.pem' >> /data/sentinel.conf;
+        echo 'tls-ca-cert-file /etc/dragonfly/certs/ca-cert.pem' >> /data/sentinel.conf;
+        echo 'tls-auth-clients no' >> /data/sentinel.conf;
       else
         echo 'Sentinel config exists, using existing...'
       fi
-      redis-server /data/sentinel.conf --sentinel --tls-cert-file /etc/dragonfly/certs/server-cert.pem --tls-key-file /etc/dragonfly/certs/server-key.pem --tls-ca-cert-file /etc/dragonfly/certs/ca-cert.pem --tls-auth-clients no"
+      redis-server /data/sentinel.conf --sentinel"
 
 volumes:
   dragonfly_data:

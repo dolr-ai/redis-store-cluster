@@ -49,10 +49,51 @@ services:
       start_period: 30s
     ulimits:
       memlock: -1
- 
+
+  sentinel:
+    image: redis:7.2-alpine
+    container_name: sentinel
+    depends_on:
+      - dragonfly
+    ports:
+      - "26379:26379"
+    environment:
+      - PRIMARY_HOST=${PRIMARY_HOST}
+      - DRAGONFLY_PASSWORD=${DRAGONFLY_PASSWORD}
+      - CURRENT_HOST=${CURRENT_HOST}
+    volumes:
+      - sentinel_data:/data
+      - /home/certs:/etc/dragonfly/certs:ro
+    networks:
+      - dragonfly_network
+    logging: *default-logging
+    restart: unless-stopped
+    # Identical Sentinel startup command
+    command: >
+      /bin/sh -c "
+      if [ ! -f /data/sentinel.conf ]; then
+        echo 'Creating new sentinel config...'
+        echo 'port 0' > /data/sentinel.conf
+        echo 'tls-port 26379' >> /data/sentinel.conf
+        echo 'dir /data' >> /data/sentinel.conf
+        echo 'sentinel resolve-hostnames yes' >> /data/sentinel.conf
+        echo 'sentinel announce-ip ${CURRENT_HOST}' >> /data/sentinel.conf
+        echo 'sentinel monitor mymaster ${PRIMARY_HOST} 6380 2' >> /data/sentinel.conf
+        echo 'sentinel auth-pass mymaster ${DRAGONFLY_PASSWORD}' >> /data/sentinel.conf
+        echo 'sentinel down-after-milliseconds mymaster 5000' >> /data/sentinel.conf
+        echo 'sentinel failover-timeout mymaster 60000' >> /data/sentinel.conf
+        echo 'sentinel parallel-syncs mymaster 1' >> /data/sentinel.conf
+        echo 'tls-replication yes' >> /data/sentinel.conf
+      else
+        echo 'Sentinel config exists, using existing...'
+      fi
+      redis-server /data/sentinel.conf --sentinel --tls-cert-file /etc/dragonfly/certs/server-cert.pem --tls-key-file /etc/dragonfly/certs/server-key.pem --tls-ca-cert-file /etc/dragonfly/certs/ca-cert.pem --tls-auth-clients no"
+
 volumes:
   dragonfly_data:
-      driver: local
+    driver: local
+  sentinel_data:
+    driver: local
 
 networks:
   dragonfly_network:

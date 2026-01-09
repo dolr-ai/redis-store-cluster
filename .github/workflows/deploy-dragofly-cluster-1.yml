@@ -1,7 +1,7 @@
 name: Deploy Dragonfly to Bare Metal (cluster-1)
 
 on:
-  push:
+  # push:
   workflow_dispatch:
 
 concurrency:

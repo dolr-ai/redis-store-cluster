@@ -179,7 +179,7 @@ jobs:
             docker compose -f docker-compose.replica.yml pull
             
             # Deploy
-            docker compose -f docker-compose.replica.yml up -d --remove-orphans
+            docker compose -f docker-compose.replica.yml up -d --force-recreate --remove-orphans
 
             # Wait for health check
             echo "Waiting for Dragonfly to be healthy..."

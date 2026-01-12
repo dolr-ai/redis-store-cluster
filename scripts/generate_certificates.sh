@@ -6,7 +6,8 @@ set -euo pipefail
 # ================================
 
 PRIMARY_HOST="$1"
-REPLICA_HOST="$2"
+REPLICA_HOST_1="$2"
+REPLICA_HOST_2="$3"
 CERT_DIR="PATH TO CERTS DIRECTORY"
 DAYS=365
 
@@ -14,8 +15,8 @@ DAYS=365
 # Validation
 # ================================
 
-if [[ -z "${PRIMARY_HOST}" || -z "${REPLICA_HOST}" ]]; then
-  echo "Usage: $0 <PRIMARY_IP> <REPLICA_IP>"
+if [[ -z "${PRIMARY_HOST}" || -z "${REPLICA_HOST_1}" || -z "${REPLICA_HOST_2}" ]]; then
+  echo "Usage: $0 <PRIMARY_IP> <REPLICA_IP_1> <REPLICA_IP_2>"
   exit 1
 fi
 
@@ -27,7 +28,7 @@ mkdir -p "$CERT_DIR"
 
 SAN_CNF=$(mktemp)
 cat > "$SAN_CNF" <<EOF
-subjectAltName = IP:${PRIMARY_HOST},IP:${REPLICA_HOST}
+subjectAltName = IP:${PRIMARY_HOST},IP:${REPLICA_HOST_1},IP:${REPLICA_HOST_2}
 EOF
 
 echo "📜 SAN config:"

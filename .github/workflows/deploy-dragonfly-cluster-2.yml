@@ -221,6 +221,7 @@ jobs:
            ssh root@${{ steps.cluster_vars.outputs.replica_host }} << 'EOF'
             # Check if sentinel sees the master
             docker exec sentinel redis-cli \
+              -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_2 }} \
               --tls \
               --cert /etc/dragonfly/certs/client-cert.pem \
               --key /etc/dragonfly/certs/client-key.pem \
@@ -229,6 +230,7 @@ jobs:
               SENTINEL master mymaster
 
             docker exec sentinel redis-cli \
+              -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_2 }} \
               --tls \
               --cert /etc/dragonfly/certs/client-cert.pem \
               --key /etc/dragonfly/certs/client-key.pem \

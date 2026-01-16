@@ -68,6 +68,7 @@ services:
       - dragonfly_network
     logging: *default-logging
     restart: unless-stopped
+    # Sentinel startup script to handle config generation and TLS
     entrypoint: /bin/sh
     command:
       - -c

@@ -69,25 +69,22 @@ services:
     command:
       - -c
       - |
-        if [ ! -f /data/sentinel.conf ]; then
-          echo 'port 0' > /data/sentinel.conf
-          echo 'tls-port 26379' >> /data/sentinel.conf
-          echo 'dir /data' >> /data/sentinel.conf
-          echo 'sentinel resolve-hostnames yes' >> /data/sentinel.conf
-          echo "sentinel announce-ip $${CURRENT_HOST}" >> /data/sentinel.conf
-          echo "sentinel monitor mymaster $${PRIMARY_HOST} 6380 2" >> /data/sentinel.conf
-          echo "sentinel auth-pass mymaster $${DRAGONFLY_PASSWORD}" >> /data/sentinel.conf
-          echo 'sentinel down-after-milliseconds mymaster 5000' >> /data/sentinel.conf
-          echo 'sentinel failover-timeout mymaster 60000' >> /data/sentinel.conf
-          echo 'sentinel parallel-syncs mymaster 1' >> /data/sentinel.conf
-          echo 'tls-replication yes' >> /data/sentinel.conf
-          echo 'tls-cert-file /etc/dragonfly/certs/server-cert.pem' >> /data/sentinel.conf
-          echo 'tls-key-file /etc/dragonfly/certs/server-key.pem' >> /data/sentinel.conf
-          echo 'tls-ca-cert-file /etc/dragonfly/certs/ca-cert.pem' >> /data/sentinel.conf
-          echo 'tls-auth-clients yes' >> /data/sentinel.conf
-        else
-          echo 'Sentinel config exists, using existing...'
-        fi
+        echo 'Creating sentinel config'
+        echo 'port 0' > /data/sentinel.conf
+        echo 'tls-port 26379' >> /data/sentinel.conf
+        echo 'dir /data' >> /data/sentinel.conf
+        echo 'sentinel resolve-hostnames yes' >> /data/sentinel.conf
+        echo "sentinel announce-ip $${CURRENT_HOST}" >> /data/sentinel.conf
+        echo "sentinel monitor mymaster $${PRIMARY_HOST} 6380 2" >> /data/sentinel.conf
+        echo "sentinel auth-pass mymaster $${DRAGONFLY_PASSWORD}" >> /data/sentinel.conf
+        echo 'sentinel down-after-milliseconds mymaster 5000' >> /data/sentinel.conf
+        echo 'sentinel failover-timeout mymaster 60000' >> /data/sentinel.conf
+        echo 'sentinel parallel-syncs mymaster 1' >> /data/sentinel.conf
+        echo 'tls-replication yes' >> /data/sentinel.conf
+        echo 'tls-cert-file /etc/dragonfly/certs/server-cert.pem' >> /data/sentinel.conf
+        echo 'tls-key-file /etc/dragonfly/certs/server-key.pem' >> /data/sentinel.conf
+        echo 'tls-ca-cert-file /etc/dragonfly/certs/ca-cert.pem' >> /data/sentinel.conf
+        echo 'tls-auth-clients yes' >> /data/sentinel.conf
         redis-server /data/sentinel.conf --sentinel
 
 volumes:

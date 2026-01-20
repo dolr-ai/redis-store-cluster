@@ -14,6 +14,7 @@ services:
       - "6380:6380"
     command:
       - --requirepass=${DRAGONFLY_PASSWORD}
+      - --masterauth=${DRAGONFLY_PASSWORD}
       - --bind=0.0.0.0
       - --port=6380
       - --dir=/data

@@ -1,0 +1,367 @@
+name: Deploy Dragonfly to Bare Metal (cluster-1)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-dragonfly-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PRIMARY_HOST: ${{ vars.PRIMARY_HOST_CLUSTER_1 }}
+  REPLICA_HOST_1: ${{ vars.REPLICA_HOST_CLUSTER_1 }}
+  REPLICA_HOST_2: ${{ vars.REPLICA_HOST_2_CLUSTER_1 }}
+
+jobs:
+
+  deploy-primary:
+    name: Deploy Dragonfly Primary
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set cluster variables
+        id: cluster_vars
+        run: |
+            echo "primary_host=${PRIMARY_HOST}" >> $GITHUB_OUTPUT
+            echo "replica_host_1=${REPLICA_HOST_1}" >> $GITHUB_OUTPUT
+            echo "replica_host_2=${REPLICA_HOST_2}" >> $GITHUB_OUTPUT
+      
+      - name: Display selected cluster info
+        run: |
+          echo "Deploying to: cluster-1"
+          echo "Primary Host: ${{ steps.cluster_vars.outputs.primary_host }}"
+          echo "Target: ${{ github.event.inputs.target }}"
+
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.HETZNER_BARE_METAL_GITHUB_ACTIONS_SSH_PRIVATE_KEY }}
+
+      - name: Add server to known hosts
+        run: |
+          ssh-keyscan -H ${{ steps.cluster_vars.outputs.primary_host }} >> ~/.ssh/known_hosts
+      
+      - name: Check server connectivity
+        run: |
+          ssh -o ConnectTimeout=10 root@${{ steps.cluster_vars.outputs.primary_host }} "echo 'Server connection successful'"
+
+      - name: Sync deployment files to server
+        run: |
+          # Sync docker-compose.primary.yml to remote server
+          rsync -avz --delete \
+            ./deploy/docker-compose.primary.yml \
+            root@${{ steps.cluster_vars.outputs.primary_host }}:/home/dragonfly/
+
+          # Fix permissions on the server
+          ssh root@${{ steps.cluster_vars.outputs.primary_host }} << 'EOF'
+            chmod 755 /home/certs
+            chmod 644 /home/certs/*-cert.pem
+            chmod 644 /home/certs/*-key.pem
+            ls -la /home/certs/
+          EOF
+
+      - name: Create .env file on primary server
+        run: |
+          ssh root@${{ steps.cluster_vars.outputs.primary_host }} \
+            "cat > /home/dragonfly/.env <<EOF
+            DRAGONFLY_PASSWORD=${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }}
+            PRIMARY_HOST=${{ steps.cluster_vars.outputs.primary_host }}
+            CURRENT_HOST=${{ steps.cluster_vars.outputs.primary_host }}
+            EOF"
+      
+      - name: Deploy Dragonfly Primary
+        env:
+          DRAGONFLY_PASSWORD: ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }}
+        run: |
+          ssh root@${{ steps.cluster_vars.outputs.primary_host }} << 'EOF'
+            cd /home/dragonfly
+            
+            # Pull latest image
+            docker compose -f docker-compose.primary.yml pull
+            
+            # Deploy with zero downtime
+            docker compose -f docker-compose.primary.yml up -d --remove-orphans
+
+            # Wait for health check
+            echo "Waiting for Dragonfly to be healthy..."
+            timeout 60 sh -c 'until docker compose -f docker-compose.primary.yml ps | grep -q "healthy"; do sleep 2; done'
+            
+            # Show status
+            docker compose -f docker-compose.primary.yml ps
+            docker compose -f docker-compose.primary.yml logs --tail=50
+          EOF
+
+      - name: Verify primary deployment with mTLS
+        run: |
+          ssh root@${{ steps.cluster_vars.outputs.primary_host }} << 'EOF'
+            docker exec dragonfly redis-cli \
+              -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
+              --tls \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
+              -p 6380 \
+              ping
+          EOF
+
+  deploy-replica:
+    name: Deploy Dragonfly Replica
+    runs-on: ubuntu-latest
+    needs: deploy-primary
+    strategy:
+      matrix:
+        server:
+          - name: ${{ vars.REPLICA_HOST_CLUSTER_1_NAME }}
+            host: ${{ vars.REPLICA_HOST_CLUSTER_1 }}
+          - name: ${{ vars.REPLICA_HOST_2_CLUSTER_1_NAME }}
+            host: ${{ vars.REPLICA_HOST_2_CLUSTER_1 }}
+      max-parallel: 1
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set cluster variables
+        id: cluster_vars
+        run: |
+            echo "primary_host=${PRIMARY_HOST}" >> $GITHUB_OUTPUT
+            echo "replica_host=${{matrix.server.host}}" >> $GITHUB_OUTPUT
+
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.HETZNER_BARE_METAL_GITHUB_ACTIONS_SSH_PRIVATE_KEY }}
+
+      - name: Add server to known hosts
+        run: |
+          ssh-keyscan -H ${{ steps.cluster_vars.outputs.replica_host }} >> ~/.ssh/known_hosts
+      
+      - name: Check server connectivity
+        run: |
+          ssh -o ConnectTimeout=10 root@${{ steps.cluster_vars.outputs.replica_host }} "echo 'Server connection successful'"
+
+      - name: Sync deployment files to server
+        run: |
+          # Sync docker-compose.replica.yml to remote server
+          rsync -avz --delete \
+            ./deploy/docker-compose.replica.yml \
+            root@${{ steps.cluster_vars.outputs.replica_host }}:/home/dragonfly/
+
+          # Fix permissions on the server
+          ssh root@${{ steps.cluster_vars.outputs.replica_host }} << 'EOF'
+            chmod 755 /home/certs
+            chmod 644 /home/certs/*-cert.pem
+            chmod 644 /home/certs/*-key.pem
+            ls -la /home/certs/
+          EOF
+
+      - name: Create .env file on replica server
+        run: |
+          ssh root@${{ steps.cluster_vars.outputs.replica_host }} "cat > /home/dragonfly/.env <<EOF
+          DRAGONFLY_PASSWORD=${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }}
+          PRIMARY_HOST=${{ steps.cluster_vars.outputs.primary_host }}
+          CURRENT_HOST=${{ steps.cluster_vars.outputs.replica_host }}
+          EOF"
+
+      - name: Deploy Dragonfly Replica
+        env:
+            DRAGONFLY_PASSWORD: ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }}
+            PRIMARY_HOST: ${{ steps.cluster_vars.outputs.primary_host }}
+        run: |
+          ssh root@${{ steps.cluster_vars.outputs.replica_host }} << 'EOF'
+            cd /home/dragonfly
+            
+            # Pull latest image
+            docker compose -f docker-compose.replica.yml pull
+            
+            # Deploy
+            docker compose -f docker-compose.replica.yml up -d --remove-orphans
+
+            # Wait for health check
+            echo "Waiting for Dragonfly to be healthy..."
+            timeout 60 sh -c 'until docker compose -f docker-compose.replica.yml ps | grep -q "healthy"; do sleep 2; done'
+            
+            # Show status
+            docker compose -f docker-compose.replica.yml ps
+            docker compose -f docker-compose.replica.yml logs --tail=50
+          EOF
+
+      - name: Verify replica deployment with mTLS
+        run: |
+          ssh root@${{ steps.cluster_vars.outputs.replica_host }} << 'EOF'
+            docker exec dragonfly redis-cli \
+              -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
+              --tls \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
+              -p 6380 \
+              ping
+          EOF
+
+      - name: Check replication status
+        run: |
+          ssh root@${{ steps.cluster_vars.outputs.replica_host }} << 'EOF'
+            docker exec dragonfly redis-cli \
+              -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
+              --tls \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
+              -p 6380 \
+              INFO replication
+          EOF
+
+      - name: Check Sentinel Status
+        run: |
+           ssh root@${{ steps.cluster_vars.outputs.replica_host }} << 'EOF'
+            # Check if sentinel sees the master
+            docker exec sentinel redis-cli \
+              --tls \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
+              -p 26379 \
+              SENTINEL master mymaster
+
+            docker exec sentinel redis-cli \
+              --tls \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
+              -p 26379 \
+              SENTINEL sentinels mymaster
+           EOF
+
+  health-check:
+    name: Post-Deployment Health Check
+    runs-on: ubuntu-latest
+    needs: [deploy-primary, deploy-replica]
+    if: always() && (needs.deploy-primary.result == 'success' || needs.deploy-replica.result == 'success')
+
+    steps:
+      - name: Set cluster variables
+        id: cluster_vars
+        run: |
+            echo "primary_host=${PRIMARY_HOST}" >> $GITHUB_OUTPUT
+            echo "replica_host_1=${REPLICA_HOST_1}" >> $GITHUB_OUTPUT
+            echo "replica_host_2=${REPLICA_HOST_2}" >> $GITHUB_OUTPUT
+
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.HETZNER_BARE_METAL_GITHUB_ACTIONS_SSH_PRIVATE_KEY }}
+
+      - name: Add servers to known hosts
+        run: |
+          ssh-keyscan -H ${{ steps.cluster_vars.outputs.primary_host }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ steps.cluster_vars.outputs.replica_host_1 }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ steps.cluster_vars.outputs.replica_host_2 }} >> ~/.ssh/known_hosts
+
+
+      - name: Check primary health
+        if: needs.deploy-primary.result == 'success'
+        run: |
+          echo "=== Primary Health Check ==="
+          echo "Host: ${{ steps.cluster_vars.outputs.primary_host }}"
+          ssh root@${{ steps.cluster_vars.outputs.primary_host }} << 'EOF'
+            docker exec dragonfly redis-cli \
+              -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
+              --tls \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
+              -p 6380 \
+              --no-auth-warning INFO server | grep uptime_in_seconds
+            docker exec dragonfly redis-cli \
+              -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
+              --tls \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
+              -p 6380 \
+              --no-auth-warning DBSIZE
+          EOF
+
+      - name: Check replica 1 health
+        if: needs.deploy-replica.result == 'success'
+        run: |
+          echo "=== Replica-1 Health Check (cluster-1) ==="
+          echo "Host: ${{ steps.cluster_vars.outputs.replica_host_1 }}"
+          ssh root@${{ steps.cluster_vars.outputs.replica_host_1 }} << 'EOF'
+            docker exec dragonfly redis-cli \
+              -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
+              --tls \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
+              -p 6380 \
+              --no-auth-warning INFO server | grep uptime_in_seconds
+            docker exec dragonfly redis-cli \
+              -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
+              --tls \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
+              -p 6380 \
+              --no-auth-warning INFO replication | grep -E "role|master_host|master_link_status"
+            docker exec dragonfly redis-cli \
+              -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
+              --tls \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
+              -p 6380 \
+              --no-auth-warning DBSIZE
+          EOF
+
+      - name: Check replica 2 health
+        if: needs.deploy-replica.result == 'success'
+        run: |
+          echo "=== Replica-2 Health Check (cluster-1) ==="
+          echo "Host: ${{ steps.cluster_vars.outputs.replica_host_2 }}"
+          ssh root@${{ steps.cluster_vars.outputs.replica_host_2 }} << 'EOF'
+            docker exec dragonfly redis-cli \
+              -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
+              --tls \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
+              -p 6380 \
+              --no-auth-warning INFO server | grep uptime_in_seconds
+            docker exec dragonfly redis-cli \
+              -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
+              --tls \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
+              -p 6380 \
+              --no-auth-warning INFO replication | grep -E "role|master_host|master_link_status"
+            docker exec dragonfly redis-cli \
+              -a ${{ secrets.DRAGONFLY_PASSWORD_CLUSTER_1 }} \
+              --tls \
+              --cert /etc/dragonfly/certs/client-cert.pem \
+              --key /etc/dragonfly/certs/client-key.pem \
+              --cacert /etc/dragonfly/certs/ca-cert.pem \
+              -p 6380 \
+              --no-auth-warning DBSIZE
+          EOF
+
+      - name: Deployment Summary
+        if: success()
+        run: |
+          echo "================================"
+          echo "Deployment Successful"
+          echo "================================"
+          echo ""
+          echo "Cluster: cluster-1"
+          echo "Primary Status: ${{ needs.deploy-primary.result }}"
+          echo "Replicas Status: ${{ needs.deploy-replica.result }}"
+          echo ""
+          echo "Connection Info:"
+          echo "- Port: 6380 (Dragonfly native mTLS)"
+          echo "- Client certificate required for all connections"
+          echo ""

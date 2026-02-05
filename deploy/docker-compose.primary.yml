@@ -1,0 +1,105 @@
+version: '3.8'
+
+x-logging: &default-logging
+  driver: journald
+  options:
+    tag: "{{.Name}}"
+
+services:
+  # Primary Dragonfly service
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.34.2
+    container_name: dragonfly
+    ports:
+      - "6380:6380"
+    command:
+      - --requirepass=${DRAGONFLY_PASSWORD}
+      - --masterauth=${DRAGONFLY_PASSWORD}
+      - --bind=0.0.0.0
+      - --port=6380
+      - --dir=/data
+      - --dbfilename=dump
+      - --snapshot_cron=0 */6 * * *  # Snapshot every 6 hours
+      - --cache_mode=true
+      - --proactor_threads=8
+      - --primary_port_http_enabled=true
+      - --logtostderr
+      - --vmodule=*=1  # 0=ERROR, 1=WARNING, 2=INFO, 3=DEBUG
+      - --tls=true
+      - --tls_cert_file=/etc/dragonfly/certs/server-cert.pem
+      - --tls_key_file=/etc/dragonfly/certs/server-key.pem
+      - --tls_ca_cert_file=/etc/dragonfly/certs/ca-cert.pem
+      - --tls_replication=true
+      # Connection settings to prevent broken pipe errors
+      - --tcp_keepalive=60
+      - --timeout=0
+      - --maxclients=10000
+    environment:
+      - DRAGONFLY_PASSWORD=${DRAGONFLY_PASSWORD}
+    volumes:
+      - dragonfly_data:/data
+      - /home/certs:/etc/dragonfly/certs:ro
+    networks:
+      - dragonfly_network
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${DRAGONFLY_PASSWORD}", "--tls", "--cert", "/etc/dragonfly/certs/client-cert.pem", "--key", "/etc/dragonfly/certs/client-key.pem", "--cacert", "/etc/dragonfly/certs/ca-cert.pem", "-p", "6380", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    ulimits:
+      memlock: -1
+
+  sentinel:
+    image: redis:7.2-alpine
+    container_name: sentinel
+    depends_on:
+      - dragonfly
+    ports:
+      - "26379:26379"
+    environment:
+      - PRIMARY_HOST=${PRIMARY_HOST}
+      - DRAGONFLY_PASSWORD=${DRAGONFLY_PASSWORD}
+      - CURRENT_HOST=${CURRENT_HOST}
+    volumes:
+      - sentinel_data:/data
+      - /home/certs:/etc/dragonfly/certs:ro
+    networks:
+      - dragonfly_network
+    logging: *default-logging
+    restart: unless-stopped
+    # Sentinel startup script to handle config generation and TLS
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        echo 'Creating sentinel config'
+        echo 'port 0' > /data/sentinel.conf
+        echo 'tls-port 26379' >> /data/sentinel.conf
+        echo 'dir /data' >> /data/sentinel.conf
+        echo 'sentinel resolve-hostnames yes' >> /data/sentinel.conf
+        echo "sentinel announce-ip $${CURRENT_HOST}" >> /data/sentinel.conf
+        echo "sentinel monitor mymaster $${PRIMARY_HOST} 6380 2" >> /data/sentinel.conf
+        echo "sentinel auth-pass mymaster $${DRAGONFLY_PASSWORD}" >> /data/sentinel.conf
+        echo 'sentinel down-after-milliseconds mymaster 5000' >> /data/sentinel.conf
+        echo 'sentinel failover-timeout mymaster 60000' >> /data/sentinel.conf
+        echo 'sentinel parallel-syncs mymaster 1' >> /data/sentinel.conf
+        echo 'tls-replication yes' >> /data/sentinel.conf
+        echo 'tls-cert-file /etc/dragonfly/certs/server-cert.pem' >> /data/sentinel.conf
+        echo 'tls-key-file /etc/dragonfly/certs/server-key.pem' >> /data/sentinel.conf
+        echo 'tls-ca-cert-file /etc/dragonfly/certs/ca-cert.pem' >> /data/sentinel.conf
+        echo 'tls-auth-clients yes' >> /data/sentinel.conf
+        echo 'tcp-keepalive 60' >> /data/sentinel.conf
+        redis-server /data/sentinel.conf --sentinel
+
+volumes:
+  dragonfly_data:
+    driver: local
+  sentinel_data:
+    driver: local
+
+networks:
+  dragonfly_network:
+    driver: bridge
